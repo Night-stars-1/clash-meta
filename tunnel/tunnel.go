@@ -499,7 +499,9 @@ func handleTCPConn(connCtx C.ConnContext) {
 			_ = conn.SetReadDeadline(time.Time{})
 		}()
 	}
-
+	
+	var peekBytes []byte
+	
 	address := metadata.RemoteAddress()
 	if http_cache.Exist(address) {
 		metadata.Http = true
@@ -532,7 +534,6 @@ func handleTCPConn(connCtx C.ConnContext) {
 		}
 	}
 
-	var peekBytes []byte
 	var peekLen int
 
 	ctx, cancel := context.WithTimeout(context.Background(), C.DefaultTCPTimeout)
