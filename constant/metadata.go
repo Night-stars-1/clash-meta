@@ -14,6 +14,7 @@ import (
 const (
 	TCP NetWork = iota
 	UDP
+	NOHTTPS
 	ALLNet
 	InvalidNet = 0xff
 )
@@ -42,6 +43,8 @@ func (n NetWork) String() string {
 		return "tcp"
 	case UDP:
 		return "udp"
+	case NOHTTPS:
+		return "http"
 	case ALLNet:
 		return "all"
 	default:
@@ -152,6 +155,7 @@ type Metadata struct {
 	RawDstAddr net.Addr 	`json:"-"`
 	// Only domain rule
 	SniffHost string `json:"sniffHost"`
+	Http		bool     `json:"http"`
 }
 
 func (m *Metadata) RemoteAddress() string {

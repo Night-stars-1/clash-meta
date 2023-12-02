@@ -7,11 +7,13 @@ import (
 	"net/netip"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/jpillora/backoff"
 
+	"github.com/metacubex/mihomo/common/cache"
 	N "github.com/metacubex/mihomo/common/net"
 	"github.com/metacubex/mihomo/component/nat"
 	P "github.com/metacubex/mihomo/component/process"
@@ -41,6 +43,9 @@ var (
 
 	// Outbound Rule
 	mode = Rule
+
+	http_cache = cache.New[string, bool](cache.WithAge[string, bool](30))
+
 
 	// default timeout for UDP session
 	udpTimeout = 60 * time.Second
@@ -299,6 +304,17 @@ func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err erro
 	return
 }
 
+func isHTTPRequest(data string) bool {
+	// 仅检查最常见的HTTP方法
+	methods := []string{"GET", "POST", "HEAD", "PUT", "DELETE", "OPTIONS", "PATCH"}
+	for _, method := range methods {
+		if strings.HasPrefix(data, method) {
+			return true
+		}
+	}
+	return false
+}
+
 func handleUDPConn(packet C.PacketAdapter) {
 	if !isHandle(packet.Metadata().Type) {
 		packet.Drop()
@@ -484,6 +500,21 @@ func handleTCPConn(connCtx C.ConnContext) {
 		}()
 	}
 
+	address := metadata.RemoteAddress()
+	if http_cache.Exist(address) {
+		metadata.Http = true
+		http_cache.Set(address, true)
+		log.Debugln("[TCP] %s --> %s", address, "HTTP")
+	} else {
+		peekBytes, _ = conn.Peek(4)
+		peekStr := string(peekBytes)
+		log.Debugln("[TCP] %s --> %s", address, peekStr)
+		if isHTTPRequest(peekStr) {
+			metadata.Http = true
+			http_cache.Set(address, true)
+		}
+	}
+
 	proxy, rule, err := resolveMetadata(metadata)
 	if err != nil {
 		log.Warnln("[Metadata] parse failed: %s", err.Error())
@@ -509,9 +540,12 @@ func handleTCPConn(connCtx C.ConnContext) {
 	remoteConn, err := retry(ctx, func(ctx context.Context) (remoteConn C.Conn, err error) {
 		remoteConn, err = proxy.DialContext(ctx, dialMetadata)
 		if err != nil {
+			conn.Close()
 			return
 		}
 
+		peekBytes, _ = conn.Peek(conn.Buffered())
+		_, err = remoteConn.Write(peekBytes)
 		if N.NeedHandshake(remoteConn) {
 			defer func() {
 				for _, chain := range remoteConn.Chains() {
@@ -529,6 +563,7 @@ func handleTCPConn(connCtx C.ConnContext) {
 			peekBytes, _ = conn.Peek(conn.Buffered())
 			_, err = remoteConn.Write(peekBytes)
 			if err != nil {
+				conn.Close()
 				return
 			}
 			if peekLen = len(peekBytes); peekLen > 0 {
@@ -550,6 +585,7 @@ func handleTCPConn(connCtx C.ConnContext) {
 		}
 	})
 	if err != nil {
+		conn.Close()
 		return
 	}
 
@@ -612,7 +648,7 @@ func match(metadata *C.Metadata) (C.Proxy, C.Rule, error) {
 				if err != nil {
 					log.Debugln("[DNS] resolve %s error: %s", metadata.Host, err.Error())
 				} else {
-					log.Debugln("[DNS] %s --> %s", metadata.Host, ip.String())
+					log.Debugln("[DNS] %s --> %s --> %s", metadata.SrcIP, metadata.Host, ip.String())
 					metadata.DstIP = ip
 				}
 				resolved = true

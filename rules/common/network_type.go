@@ -23,6 +23,8 @@ func NewNetworkType(network, adapter string) (*NetworkType, error) {
 		ntType.network = C.TCP
 	case "UDP":
 		ntType.network = C.UDP
+	case "HTTP":
+		ntType.network = C.NOHTTPS
 	default:
 		return nil, fmt.Errorf("unsupported network type, only TCP/UDP")
 	}
@@ -35,7 +37,7 @@ func (n *NetworkType) RuleType() C.RuleType {
 }
 
 func (n *NetworkType) Match(metadata *C.Metadata) (bool, string) {
-	return n.network == metadata.NetWork, n.adapter
+	return (n.network == metadata.NetWork) || (n.network.String() == "http" && metadata.Http), n.adapter
 }
 
 func (n *NetworkType) Adapter() string {
